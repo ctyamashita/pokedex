@@ -1,6 +1,6 @@
 import van from "./van-1.2.8.min.js"
 
-const  {div, p, img, input, span, ul, li, h2, h3, br, button} = van.tags;
+const  {div, p, img, input, span, ul, li, h2, h3, small} = van.tags;
 
 const statsDisplay = {
   'hp': 'HP',
@@ -11,97 +11,110 @@ const statsDisplay = {
   'speed': 'Speed'
 }
 
+let knownPokemons = JSON.parse(localStorage.getItem('pokemons'));
+knownPokemons ||= [];
+
 const Pokedex = () => div({class: 'pokedex-container'},
   img({src: 'images/pokedex.svg', id: 'pokedex'}), 
   span({class: "circle-light"}),
   div({class: 'display-one'}),
   div({class: 'display-two'}),
-  input({type: 'text', id: 'search-input', onblur: () => fetchPokemon(), placeholder: 'type a POKéMON\'s name'})
+  input({type: 'text', id: 'search-input', onkeyup: (e) => fetchPokemon(e), placeholder: 'type a POKéMON\'s name'}),
+  span({id: 'counter'}, `${knownPokemons.length}/1025`)
 )
 
 van.add(document.body, Pokedex());
 
-const fetchPokemon = () => {
+const fetchPokemon = (e) => {
+  if (e.key !== "Enter") return;
   const userInput = document.getElementById('search-input');
-  const displayOne = document.querySelector('.display-one');
-  const displayTwo = document.querySelector('.display-two');
-  if (userInput !== '') {
+  const previousEntry = knownPokemons.find(pokemon=>pokemon.name == userInput.value);
+  if (previousEntry) {
+    displayInfo(previousEntry);
+  } else if (userInput !== '') {
     fetch(`https://pokeapi.co/api/v2/pokemon/${userInput.value}`)
-      .then(response=>{
-        if (response.ok) {
-          return response.json()
-        } else {
-          userInput.value = ''
-          return false
-        }
-      })
+      .then(response=>response.ok ? response.json() : turnOffDisplay())
       .then(data=>{
         if (data && data.sprites) {
-          displayOne.style.background = `url(${data.sprites.other['official-artwork'].front_default}) no-repeat, linear-gradient(45deg, #80800080 10%, #90ee907d 30%, #90ee907d 45%, #80800080 90%)`;
-          displayOne.style.filter = 'brightness(1.2)'
-  
           fetch(`https://pokeapi.co/api/v2/pokemon-species/${data.id}/`)
             .then(response=>response.json())
             .then(dataDescription=>{
-              console.log(dataDescription);
-              const description = dataDescription.flavor_text_entries.find(desc=>desc.language.name == 'en')
-              displayTwo.innerHTML = ''
-              van.add(displayTwo, Info({data: data, description: description}));
-              const audio = new Audio(data.cries.latest);
-              audio.play();
-              audio.addEventListener("ended", () => {
-                setTimeout(() => {
-                  speakMessage(`${data.name}.${description.flavor_text}`);
-                }, 700);
-              })
+              // generating new entry
+              const newEntry = {
+                stats: {},
+                img: data.sprites.other['official-artwork'].front_default,
+                name: data.name,
+                description: dataDescription.flavor_text_entries.find(desc=>desc.language.name == 'en').flavor_text,
+                cry: data.cries.latest,
+                id: data.id,
+                types: data.types.map(type=> type.type.name),
+                weight: data.weight,
+                height: data.height
+              }
+              data.stats.forEach(statItem => {
+                newEntry.stats[statItem.stat.name] = statItem.base_stat
+              });
+              // end new entry
+              displayInfo(newEntry)
+              knownPokemons.push(newEntry)
+              localStorage.setItem('pokemons', JSON.stringify(knownPokemons));
+              document.getElementById('counter').innerText = `${knownPokemons.length}/1025`;
             })
         }
       })
-  } else {
-    displayOne.style= 'background: linear-gradient(45deg, #80800080 10%, #90ee907d 30%, #90ee907d 45%, #80800080 90%); filter: brightness(.4)';
-    displayTwo.innerHTML = ''
   }
 }
 
+const turnOffDisplay = () => {
+  const userInput = document.getElementById('search-input');
+  const displayOne = document.querySelector('.display-one');
+  const displayTwo = document.querySelector('.display-two');
+  displayOne.style= 'background: linear-gradient(45deg, #80800080 10%, #90ee907d 30%, #90ee907d 45%, #80800080 90%); filter: brightness(.4); box-shadow: 0 0 0 2px olive, inset 0 0 2vh #80800080;';
+  displayTwo.innerHTML = ''
+  userInput.value = ''
+  return false
+}
 
+const displayInfo = (pokemon) => {
+  const userInput = document.getElementById('search-input');
+  const displayOne = document.querySelector('.display-one');
+  const displayTwo = document.querySelector('.display-two');
+  displayOne.style = `background: url(${pokemon.img}) no-repeat, linear-gradient(45deg, #80800080 10%, #90ee907d 30%, #90ee907d 45%, #80800080 90%); box-shadow: inset 0.3vh 0.3vh olive, inset 0 0 2vh #80800080, 0 0 4vh 0vh #cdff80; filter: brightness(1.2)`;
 
-const Info = ({data, description}) => div(
-  h2(data.name.toUpperCase()),
-  p(description.flavor_text),
-  h3('Dimensions'),
+  displayTwo.innerHTML = ''
+  van.add(displayTwo, Info(pokemon));
+  const audio = new Audio(pokemon.cry);
+  audio.play();
+  audio.addEventListener("ended", () => {
+    setTimeout(() => {
+      speakMessage(`${pokemon.name}. ${pokemon.description}`);
+      userInput.value = ''
+    }, 700);
+  })
+}
+
+const Info = ({name, description, stats, height, weight, id, types}) => div(
+  h2(small(`No.${id} `), name.toUpperCase()),
+  p(description),
   div({class: 'line-info'},
-    div(
-      span('Height:'),
-      br(),
-      span(`${data.height/10}m`)
+  div({class: 'dimensions-info'},
+      h3('Height'),
+      span(`${Number(height)/10}m`),
+      h3('Weight'),
+      span(`${Number(weight)/10}kg`)
     ),
     div(
-      span('Weight:'),
-      br(),
-      span(`${data.weight/10}kg`)
+      h3('Type'),
+      div({class: 'line-type'},
+        types.map(type=>span({class: type}, type))
+      )
     )
-  ),
-  h3('Type'),
-  div({class: 'line-type'},
-    data.types.map(item=>span({class: item.type.name}, item.type.name))
   ),
   h3('Stats'),
   ul(
-    data.stats.map(statItem=>li(span(`${statsDisplay[statItem.stat.name]}:`), span(statItem.base_stat)))
+    Object.keys(stats).map(stat=>li(span(`${statsDisplay[stat]}:`), span(stats[stat])))
   )
 )
-
-const speak = (text) => {
-  // Create a SpeechSynthesisUtterance
-  const utterance = new SpeechSynthesisUtterance(text);
-
-  // Select a voice
-  const voices = speechSynthesis.getVoices();
-  utterance.voice = voices[0]; // Choose a specific voice
-
-  // Speak the text
-  speechSynthesis.speak(utterance);
-}
 
 function speakMessage(message, PAUSE_MS = 500) {
   try {
